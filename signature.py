@@ -1,8 +1,13 @@
 import sys
+import os
 import tkinter as tk
+from time import time
+from shutil import rmtree
+from pathlib import Path
 from tkinter import filedialog
 from ecdsa import SigningKey, SECP256k1, util, BadSignatureError
 from hashlib import sha256
+from zipfile import ZipFile
 
 def load_key():
     while True:
@@ -27,9 +32,10 @@ def signing(readingfile, sk):
         hashfunc=sha256, 
         sigencode=util.sigencode_der
     )
-
-    with open(readingfile + ".sig", "wb") as f:
+    sign_path = readingfile + ".sig"
+    with open(sign_path, "wb") as f:
         f.write(signature)
+    return sign_path
 
 def verifying(readingfile, readingsignature, vk):
     try:
@@ -58,7 +64,7 @@ def reading(op):
                 )
         root.destroy()
         return private_key
-    if op == "1":
+    elif op == "1":
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
@@ -67,7 +73,7 @@ def reading(op):
                 )
         root.destroy()
         return readingfile
-    if op == "2":
+    elif op == "2":
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
@@ -75,19 +81,23 @@ def reading(op):
                 title="Selecciona el archivo a verificar"
                 )
         root.destroy()
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        readingsignature = filedialog.askopenfilename(
-                title="Selecciona la firma del archivo",
-                filetypes=[("Signature files", "*.sig")]
-                )
-        root.destroy()
-        return readingfile, readingsignature
+        if ".zip" in readingfile:
+            return readingfile, None
+        else:
+            readingsignature = readingfile + ".sig"
+            return readingfile, readingsignature
+
+def compress(path1, path2):
+    zipname = ".//" + str(time()).replace('.', '') + ".zip"
+    with ZipFile(zipname, 'w') as myzip:
+        myzip.write(path1, arcname=path1.name)
+        myzip.write(path2, arcname=path2.name)
+    os.remove(path2)
+    return zipname
 
 def main():
     sk = load_key()
-    menu = """--- SISTEMA DE FIRMA DIGITAL ---
+    menu = """\n--- SISTEMA DE FIRMA DIGITAL ---
 1. Firmar
 2. Verificar
 3. Cambiar de llave
@@ -98,23 +108,44 @@ Selecciona una opción: """
         if op == "1":
             readingfile = reading(op)
             try:
-                signing(readingfile, sk)
+                sign_path = signing(readingfile, sk)
+                while True:
+                    op = input("¿Desea comprimir el archivo? (S/N): ")
+                    op = op.strip().lower()
+                    if op == "s" or op == "n":
+                        break
+                if op == "s":
+                    path1 = Path(readingfile)
+                    path2 = Path(sign_path)
+                    zipname = compress(path1, path2)
             except FileNotFoundError:
                 print("No se encontró el archivo. Revisa la entrada.")
-                """except Exception:
-                print("Error al firmar.")"""
+            except Exception as e:
+                print(f"Error al firmar. {e}")
             else:
-                print("Archivo firmado con éxito.")
-                print(f"Firma guardada como {readingfile + '.sig'}")
+                if op == "s":
+                    print(f"Archivo y firma comprimidos en {zipname}")
+                if op == "n":     
+                    print("Archivo firmado con éxito.")
+                    print(f"Firma guardada como {sign_path}")
         elif op == "2":
             readingfile, readingsignature = reading(op)
             vk = sk.verifying_key
             try:
-                verifying(readingfile, readingsignature, vk)
+                if readingsignature == None:
+                    with ZipFile(readingfile, "r") as myzip:
+                        myzip.extractall(".//tmp")
+                    files = [i for i in os.walk(".//tmp")][0][2]
+                    readingfile = f".//tmp//{files[0]}"
+                    readingsignature = f".//tmp//{files[1]}"
+                    verifying(readingfile, readingsignature, vk)
+                    rmtree(".//tmp")
+                else:
+                    verifying(readingfile, readingsignature, vk)
             except FileNotFoundError:
                 print("No se encontró el archivo o la firma. Revisa la entrada.")
-            except Exception:
-                print("Error al verificar.")
+            except Exception as e:
+                print(f"Error al verificar. {e}")
         elif op == "3":
             sk = load_key()
         elif op == "4":
