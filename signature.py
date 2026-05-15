@@ -5,23 +5,37 @@ from time import time
 from shutil import rmtree
 from pathlib import Path
 from tkinter import filedialog
-from ecdsa import SigningKey, SECP256k1, util, BadSignatureError
+from ecdsa import SigningKey, VerifyingKey, SECP256k1, util, BadSignatureError
 from hashlib import sha256
 from zipfile import ZipFile
 
-def load_key():
-    while True:
-        private_key = reading(op=None)
-        try:
-            with open(private_key, "rb") as pem:
-                sk = SigningKey.from_pem(pem.read())
-        except Exception:
-            a = input("Error al cargar la llave. ¿Intentar de nuevo? [S/N]: ")
-            if a.lower().strip() != "s":
-                sys.exit()
-        else:
-            break
-    return sk
+def load_key(op):
+    if op == "2":
+        while True:
+            public_key = reading(op=None)
+            try:
+                with open(public_key, "rb") as pem:
+                    vk = VerifyingKey.from_pem(pem.read())
+            except Exception:
+                a = input("Error al cargar la llave. ¿Intentar de nuevo? [S/N]: ")
+                if a.lower().strip() != "s":
+                    sys.exit()
+            else:
+                break
+        return vk
+    elif op == "3":
+        while True:
+            private_key = reading(op)
+            try:
+                with open(private_key, "rb") as pem:
+                    sk = SigningKey.from_pem(pem.read())
+            except Exception:
+                a = input("Error al cargar la llave. ¿Intentar de nuevo? [S/N]: ")
+                if a.lower().strip() != "s":
+                    sys.exit()
+            else:
+                break
+        return sk
         
 def signing(readingfile, sk):
     with open(readingfile, "rb") as f:
@@ -59,7 +73,7 @@ def reading(op):
         root.withdraw()
         root.attributes("-topmost", True)
         private_key = filedialog.askopenfilename(
-                title="Ingresa la llave secreta",
+                title="Ingresa la llave pública",
                 filetypes=[("Key files", "*.pem")]
                 )
         root.destroy()
@@ -86,6 +100,16 @@ def reading(op):
         else:
             readingsignature = readingfile + ".sig"
             return readingfile, readingsignature
+    elif op == "3":
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        private_key = filedialog.askopenfilename(
+                title="Ingresa la llave",
+                filetypes=[("Key files", "*.pem")]
+                )
+        root.destroy()
+        return private_key
 
 def compress(path1, path2):
     zipname = ".//" + str(time()).replace('.', '') + ".zip"
@@ -96,7 +120,7 @@ def compress(path1, path2):
     return zipname
 
 def main():
-    sk = load_key()
+    sk = load_key(op="3")
     menu = """\n--- SISTEMA DE FIRMA DIGITAL ---
 1. Firmar
 2. Verificar
@@ -130,7 +154,7 @@ Selecciona una opción: """
                     print(f"Firma guardada como {sign_path}")
         elif op == "2":
             readingfile, readingsignature = reading(op)
-            vk = sk.verifying_key
+            vk = load_key(op)
             try:
                 if readingsignature == None:
                     with ZipFile(readingfile, "r") as myzip:
@@ -147,7 +171,7 @@ Selecciona una opción: """
             except Exception as e:
                 print(f"Error al verificar. {e}")
         elif op == "3":
-            sk = load_key()
+            sk = load_key(op)
         elif op == "4":
             break
         else:

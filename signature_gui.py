@@ -1,175 +1,217 @@
 import os
-import sys
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 from time import time
-from zipfile import ZipFile
 from shutil import rmtree
+from zipfile import ZipFile
 from hashlib import sha256
-from ecdsa import SigningKey, SECP256k1, util, BadSignatureError
+from ecdsa import SigningKey, VerifyingKey, SECP256k1, util, BadSignatureError
 
-ctk.set_appearance_mode("Light")
-ctk.set_default_color_theme("green")
+ctk.set_appearance_mode("Light") 
+ctk.set_default_color_theme("green") 
 
-class SignatureApp(ctk.CTk):
+class DigitalSignatureApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Sistema de Firma Digital")
-        self.geometry("800x500")
-        
-        self.sk = None
-        self.vk = None
-        self.current_key_path = None
+        self.title("Sistema de firma digital")
+        self.geometry("800x550")
 
-        self.grid_columnconfigure(1, weight=1)
+        self.private_key = None
+        self.public_key = None
+        self.private_key_path = ctk.StringVar(value="Sin llave privada")
+        self.public_key_path = ctk.StringVar(value="Sin llave pública")
+        
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="Firmas Digitales", font=ctk.CTkFont(size=20, weight="bold"))
-        self.logo_label.pack(pady=20, padx=20)
-
-        self.btn_load_key = ctk.CTkButton(self.sidebar, text="🔑 Insertar llave", command=self.load_key_dialog)
-        self.btn_load_key.pack(pady=10, padx=20)
-
-        self.status_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.status_frame.pack(side="bottom", fill="x", pady=20, padx=20)
-        
-        self.key_status_label = ctk.CTkLabel(self.status_frame, text="Sin llave", text_color="#FF6666", font=ctk.CTkFont(size=12))
-        self.key_status_label.pack()
-
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
-        
+        self.tabview = ctk.CTkTabview(self, width=650)
+        self.tabview.grid(row=0, column=0, padx=20, pady=(10, 20), sticky="nsew")
         self.tabview.add("Firmar documento")
         self.tabview.add("Verificar firma")
+        self.tabview.add("Administrador de llaves")
 
         self.setup_sign_tab()
         self.setup_verify_tab()
+        self.setup_key_tab()
+
+        self.status_label = ctk.CTkLabel(self, text="Listo", anchor="w")
+        self.status_label.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+
+    def setup_key_tab(self):
+        parent = self.tabview.tab("Administrador de llaves")
+        
+        ctk.CTkLabel(parent, text="Llaves criptográficas", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
+        
+        priv_frame = ctk.CTkFrame(parent)
+        priv_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(priv_frame, text="Llave privada para firmar:").pack(side="top", anchor="w", padx=10)
+        ctk.CTkEntry(priv_frame, textvariable=self.private_key_path, width=400, state="disabled").pack(side="left", padx=10, pady=10)
+        ctk.CTkButton(priv_frame, text="Insertar llave", command=self.load_private_key, width=100).pack(side="right", padx=10)
+
+        pub_frame = ctk.CTkFrame(parent)
+        pub_frame.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(pub_frame, text="Llave privada para verificar:").pack(side="top", anchor="w", padx=10)
+        ctk.CTkEntry(pub_frame, textvariable=self.public_key_path, width=400, state="disabled").pack(side="left", padx=10, pady=10)
+        ctk.CTkButton(pub_frame, text="Insertar llave", command=self.load_public_key, width=100).pack(side="right", padx=10)
+
+        ctk.CTkLabel(parent, text="Opciones de interfaz").pack(pady=(20, 0))
+        self.appearance_mode_optionemenu = ctk.CTkOptionMenu(parent, values=["Dark", "Light", "System"],
+                                                               command=self.change_appearance_mode_event)
+        self.appearance_mode_optionemenu.pack(pady=10)
 
     def setup_sign_tab(self):
-        frame = self.tabview.tab("Firmar documento")
+        parent = self.tabview.tab("Firmar documento")
         
-        self.sign_label = ctk.CTkLabel(frame, text="Paso 1: Selecciona el archivo a firmar", font=ctk.CTkFont(size=16))
-        self.sign_label.pack(pady=(20, 10))
+        self.sign_file_path = ctk.StringVar(value="")
+        self.compress_var = ctk.BooleanVar(value=True)
 
-        self.btn_select_sign = ctk.CTkButton(frame, text="📁 Seleccionar archivo", command=self.select_file_to_sign)
-        self.btn_select_sign.pack(pady=10)
+        ctk.CTkLabel(parent, text="Crear firma digital", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
+        
+        ctk.CTkLabel(parent, text="Archivo a firmar:").pack(anchor="w", padx=50)
+        file_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        file_frame.pack(fill="x", padx=50)
+        ctk.CTkEntry(file_frame, textvariable=self.sign_file_path, placeholder_text="Selecciona el archivo a firmar").pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(file_frame, text="Buscar", command=self.browse_sign_file, width=80).pack(side="right", padx=(5,0))
 
-        self.file_to_sign_path = ctk.CTkLabel(frame, text="Ningún archivo seleccionado", font=ctk.CTkFont(slant="italic"))
-        self.file_to_sign_path.pack()
+        ctk.CTkCheckBox(parent, text="Comprimir el archivo y la firma", variable=self.compress_var).pack(pady=20)
 
-        self.compress_var = ctk.BooleanVar(value=False)
-        self.check_compress = ctk.CTkCheckBox(frame, text="Comprimir archivo y firma", variable=self.compress_var)
-        self.check_compress.pack(pady=30)
-
-        self.btn_execute_sign = ctk.CTkButton(frame, text="Firmar", fg_color="#2ECC71", hover_color="#27AE60", 
-                                             command=self.execute_signing, state="disabled")
-        self.btn_execute_sign.pack(pady=20, ipadx=20, ipady=10)
+        self.sign_btn = ctk.CTkButton(parent, text="Firmar archivo", height=45, font=ctk.CTkFont(weight="bold"), 
+                                     command=self.execute_signing, fg_color="#2ecc71", hover_color="#27ae60")
+        self.sign_btn.pack(pady=20, padx=50, fill="x")
 
     def setup_verify_tab(self):
-        frame = self.tabview.tab("Verificar firma")
+        parent = self.tabview.tab("Verificar firma")
+        
+        self.verify_file_path = ctk.StringVar(value="")
+        
+        ctk.CTkLabel(parent, text="Verificar integridad", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
 
-        self.verify_label = ctk.CTkLabel(frame, text="Seleccionar archivo o carpeta comprimida", font=ctk.CTkFont(size=16))
-        self.verify_label.pack(pady=(20, 10))
+        ctk.CTkLabel(parent, text="Insertar archivo:").pack(anchor="w", padx=50)
+        v_file_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        v_file_frame.pack(fill="x", padx=50)
+        ctk.CTkEntry(v_file_frame, textvariable=self.verify_file_path, placeholder_text="Seleccionar archivo a verificar").pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(v_file_frame, text="Buscar", command=self.browse_verify_file, width=80).pack(side="right", padx=(5,0))
 
-        self.btn_select_verify = ctk.CTkButton(frame, text="📂 Abrir archivo", command=self.select_file_to_verify)
-        self.btn_select_verify.pack(pady=10)
+        self.verify_btn = ctk.CTkButton(parent, text="Verificar firma", height=45, font=ctk.CTkFont(weight="bold"),
+                                       command=self.execute_verification)
+        self.verify_btn.pack(pady=40, padx=50, fill="x")
 
-        self.file_to_verify_path = ctk.CTkLabel(frame, text="Ningún archivo seleccionado", font=ctk.CTkFont(slant="italic"))
-        self.file_to_verify_path.pack()
 
-        self.btn_execute_verify = ctk.CTkButton(frame, text="Verificar firma", fg_color="#2ECC71", hover_color="#27AE60",
-                                               command=self.execute_verification, state="disabled")
-        self.btn_execute_verify.pack(pady=40, ipadx=20, ipady=10)
-
-    def load_key_dialog(self):
-        file_path = filedialog.askopenfilename(title="Insertar llave", filetypes=[("Key files", "*.pem")])
-        if file_path:
+    def load_private_key(self):
+        path = filedialog.askopenfilename(filetypes=[("PEM files", "*.pem")])
+        if path:
             try:
-                with open(file_path, "rb") as pem:
-                    self.sk = SigningKey.from_pem(pem.read())
-                    self.vk = self.sk.verifying_key
-                    self.current_key_path = file_path
-                    self.key_status_label.configure(text="Llave lista", text_color="#2ECC71")
-                    self.btn_execute_sign.configure(state="normal")
-                    self.btn_execute_verify.configure(state="normal")
-                    messagebox.showinfo("Aviso", "¡Llave insertada con éxito!")
+                with open(path, "rb") as f:
+                    self.private_key = SigningKey.from_pem(f.read())
+                self.private_key_path.set(path)
+                self.update_status("Llave insertada con éxito")
             except Exception as e:
                 messagebox.showerror("Error", f"Error al insertar la llave: {e}")
 
-    def select_file_to_sign(self):
-        path = filedialog.askopenfilename(title="Selecciona el archivo a firmar")
+    def load_public_key(self):
+        path = filedialog.askopenfilename(filetypes=[("PEM files", "*.pem")])
         if path:
-            self.file_to_sign_path.configure(text=os.path.basename(path))
-            self.target_sign_path = path
+            try:
+                with open(path, "rb") as f:
+                    self.public_key = VerifyingKey.from_pem(f.read())
+                self.public_key_path.set(path)
+                self.update_status("Llave insertada con éxito.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al insertar llave: {e}")
 
-    def select_file_to_verify(self):
-        path = filedialog.askopenfilename(title="Selecciona el archivo a verificar")
-        if path:
-            self.file_to_verify_path.configure(text=os.path.basename(path))
-            self.target_verify_path = path
+    def browse_sign_file(self):
+        path = filedialog.askopenfilename()
+        if path: self.sign_file_path.set(path)
+
+    def browse_verify_file(self):
+        path = filedialog.askopenfilename()
+        if path: self.verify_file_path.set(path)
+
+    def update_status(self, text):
+        self.status_label.configure(text=f"Estado: {text}")
+
+    def change_appearance_mode_event(self, new_appearance_mode: str):
+        ctk.set_appearance_mode(new_appearance_mode)
 
     def execute_signing(self):
-        if not self.sk:
-            messagebox.showwarning("Advertencia", "Selecciona una llave antes de continuar")
-            return
+        if not self.private_key:
+            return messagebox.showwarning("Sin llave", "Inserta una llave privada antes de continuar.")
+        
+        input_file = self.sign_file_path.get()
+        if not input_file or not os.path.exists(input_file):
+            return messagebox.showwarning("Error", "Por favor revisa la entrada.")
 
         try:
-            with open(self.target_sign_path, "rb") as f:
-                file_data = f.read()
-
-            signature = self.sk.sign(file_data, hashfunc=sha256, sigencode=util.sigencode_der)
-            sign_path = self.target_sign_path + ".sig"
+            with open(input_file, "rb") as f:
+                data = f.read()
             
-            with open(sign_path, "wb") as f:
+            signature = self.private_key.sign(data, hashfunc=sha256, sigencode=util.sigencode_der)
+            sig_path = input_file + ".sig"
+            
+            with open(sig_path, "wb") as f:
                 f.write(signature)
 
             if self.compress_var.get():
                 zip_name = ".//" + str(time()).replace('.', '') + ".zip"
-                with ZipFile(zip_name, 'w') as myzip:
-                    myzip.write(self.target_sign_path, arcname=Path(self.target_sign_path).name)
-                    myzip.write(sign_path, arcname=Path(sign_path).name)
-                os.remove(sign_path)
-                messagebox.showinfo("Aviso", f"Archivo firmado y comprimido en:\n{zip_name}")
+                with ZipFile(zip_name, 'w') as z:
+                    z.write(input_file, arcname=Path(input_file).name)
+                    z.write(sig_path, arcname=Path(sig_path).name)
+                os.remove(sig_path)
+                messagebox.showinfo("Aviso", f"Archivo firmado y comprimido:\n{zip_name}")
             else:
-                messagebox.showinfo("Aviso", f"Firma guardada como:\n{os.path.basename(sign_path)}")
-        
+                messagebox.showinfo("Aviso", f"Firma guardada como:\n{sig_path}")
+            
+            self.update_status("Firma realizada con éxito.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al firmar: {e}")
 
     def execute_verification(self):
-        path = self.target_verify_path
+        if not self.public_key:
+            return messagebox.showwarning("Sin llave", "Inserta una llave pública antes de continuar.")
+        
+        path = self.verify_file_path.get()
+        if not path or not os.path.exists(path):
+            return messagebox.showwarning("Error", "Por favor revisa la entrada.")
+
         try:
             if path.endswith(".zip"):
-                with ZipFile(path, "r") as myzip:
-                    myzip.extractall("./tmp_verify")
-                files = os.listdir("./tmp_verify")
-                sig_file = [f for f in files if f.endswith(".sig")][0]
-                data_file = [f for f in files if not f.endswith(".sig")][0]
+                if os.path.exists("tmp_verify"): rmtree("tmp_verify")
+                os.makedirs("tmp_verify")
+                with ZipFile(path, 'r') as z:
+                    z.extractall("tmp_verify")
                 
-                with open(f"./tmp_verify/{data_file}", "rb") as f: file_data = f.read()
-                with open(f"./tmp_verify/{sig_file}", "rb") as f: sig_data = f.read()
-                rmtree("./tmp_verify")
+                files = os.listdir("tmp_verify")
+                sig_file = next((f for f in files if f.endswith(".sig")), None)
+                data_file = next((f for f in files if not f.endswith(".sig")), None)
+                
+                if not sig_file or not data_file:
+                    raise Exception("Formato del archivo inválido.")
+                
+                with open(f"tmp_verify/{data_file}", "rb") as f: data = f.read()
+                with open(f"tmp_verify/{sig_file}", "rb") as f: sig = f.read()
+                rmtree("tmp_verify")
             else:
-                sig_path = path + ".sig"
-                if not os.path.exists(sig_path):
-                    messagebox.showerror("Error", "Frima no encontrada")
-                    return
-                with open(path, "rb") as f: file_data = f.read()
-                with open(sig_path, "rb") as f: sig_data = f.read()
+                if not path.endswith(".sig"):
+                    sig_path = path + ".sig"
+                    data_path = path
+                else:
+                    sig_path = path
+                    data_path = path.replace(".sig", "")
 
-            self.vk.verify(sig_data, file_data, hashfunc=sha256, sigdecode=util.sigdecode_der)
-            messagebox.showinfo("Verificación exitosa", "✅ El documento es legítmo.")
-        
+                with open(data_path, "rb") as f: data = f.read()
+                with open(sig_path, "rb") as f: sig = f.read()
+
+            self.public_key.verify(sig, data, hashfunc=sha256, sigdecode=util.sigdecode_der)
+            messagebox.showinfo("Verificado", "El documento el legítimo.")
+            self.update_status("Verificación realizada con éxito.")
+            
         except BadSignatureError:
-            messagebox.showerror("Verificación fallida", "❌ Firma inválida. Es posible que el documento o la firma hayan sido alterados")
+            messagebox.showerror("Error", "Firma inválida. Es posible que el documento o la firma hayan sido alterados.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al verificar: {e}")
 
 if __name__ == "__main__":
-    app = SignatureApp()
+    app = DigitalSignatureApp()
     app.mainloop()
