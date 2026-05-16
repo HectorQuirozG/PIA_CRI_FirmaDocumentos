@@ -52,7 +52,7 @@ class DigitalSignatureApp(ctk.CTk):
 
         pub_frame = ctk.CTkFrame(parent)
         pub_frame.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(pub_frame, text="Llave privada para verificar:").pack(side="top", anchor="w", padx=10)
+        ctk.CTkLabel(pub_frame, text="Llave pública para verificar:").pack(side="top", anchor="w", padx=10)
         ctk.CTkEntry(pub_frame, textvariable=self.public_key_path, width=400, state="disabled").pack(side="left", padx=10, pady=10)
         ctk.CTkButton(pub_frame, text="Insertar llave", command=self.load_public_key, width=100).pack(side="right", padx=10)
 
